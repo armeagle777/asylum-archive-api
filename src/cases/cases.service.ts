@@ -29,18 +29,7 @@ export class CasesService {
           c.contact_tel,
           c.contact_email,
           c.mul_num,
-          c.case_status,
-          p.personal_id,
-          p.f_name_arm,
-          p.l_name_arm,
-          p.m_name_arm,
-          p.f_name_eng,
-          p.l_name_eng,
-          p.m_name_eng,
-          p.citizenship,
-          p.doc_num,
-          p.pnum,
-          card.card_number
+          c.case_status
         FROM tb_case AS c
         LEFT JOIN tb_person AS p ON p.case_id = c.case_id
         LEFT JOIN tb_cards AS card ON card.personal_id = p.personal_id
