@@ -1,4 +1,9 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { QueryTypes, Sequelize } from 'sequelize';
 import { SEQUELIZE } from '../database/database.constants';
 import { SearchCasesQueryDto } from './dto/search-cases-query.dto';
@@ -9,11 +14,11 @@ export class CasesService {
   constructor(@Inject(SEQUELIZE) private readonly sequelize: Sequelize) {}
 
   async searchCases({
-    query,
     limit,
     offset,
+    ...filters
   }: SearchCasesQueryDto): Promise<Record<string, unknown>[]> {
-    const likeQuery = `%${query}%`;
+    const { whereClause, replacements } = this.buildSearchWhereClause(filters);
 
     return this.sequelize.query<Record<string, unknown>>(
       `
@@ -39,25 +44,12 @@ export class CasesService {
         FROM tb_case AS c
         LEFT JOIN tb_person AS p ON p.case_id = c.case_id
         LEFT JOIN tb_cards AS card ON card.personal_id = p.personal_id
-        WHERE
-          c.contact_tel LIKE :likeQuery
-          OR c.contact_email LIKE :likeQuery
-          OR c.mul_num LIKE :likeQuery
-          OR p.f_name_arm LIKE :likeQuery
-          OR p.l_name_arm LIKE :likeQuery
-          OR p.m_name_arm LIKE :likeQuery
-          OR p.f_name_eng LIKE :likeQuery
-          OR p.l_name_eng LIKE :likeQuery
-          OR p.m_name_eng LIKE :likeQuery
-          OR CAST(p.citizenship AS CHAR) LIKE :likeQuery
-          OR p.doc_num LIKE :likeQuery
-          OR p.pnum LIKE :likeQuery
-          OR CAST(card.card_number AS CHAR) LIKE :likeQuery
+        WHERE ${whereClause}
         ORDER BY c.case_id DESC
         LIMIT :limit OFFSET :offset
       `,
       {
-        replacements: { likeQuery, limit, offset },
+        replacements: { ...replacements, limit, offset },
         type: QueryTypes.SELECT,
       },
     );
@@ -128,6 +120,94 @@ export class CasesService {
         replacements: { caseId },
         type: QueryTypes.SELECT,
       },
+    );
+  }
+
+  private buildSearchWhereClause(
+    filters: Omit<SearchCasesQueryDto, 'limit' | 'offset'>,
+  ): { whereClause: string; replacements: Record<string, string> } {
+    const clauses: string[] = [];
+    const replacements: Record<string, string> = {};
+
+    this.addLikeFilter(
+      clauses,
+      replacements,
+      'contactTel',
+      filters.contactTel,
+      ['c.contact_tel'],
+    );
+    this.addLikeFilter(
+      clauses,
+      replacements,
+      'contactEmail',
+      filters.contactEmail,
+      ['c.contact_email'],
+    );
+    this.addLikeFilter(clauses, replacements, 'mulNum', filters.mulNum, [
+      'c.mul_num',
+    ]);
+    this.addLikeFilter(clauses, replacements, 'firstName', filters.firstName, [
+      'p.f_name_arm',
+      'p.f_name_eng',
+    ]);
+    this.addLikeFilter(clauses, replacements, 'lastName', filters.lastName, [
+      'p.l_name_arm',
+      'p.l_name_eng',
+    ]);
+    this.addLikeFilter(
+      clauses,
+      replacements,
+      'middleName',
+      filters.middleName,
+      ['p.m_name_arm', 'p.m_name_eng'],
+    );
+    this.addLikeFilter(
+      clauses,
+      replacements,
+      'citizenship',
+      filters.citizenship,
+      ['CAST(p.citizenship AS CHAR)'],
+    );
+    this.addLikeFilter(clauses, replacements, 'docNum', filters.docNum, [
+      'p.doc_num',
+    ]);
+    this.addLikeFilter(clauses, replacements, 'pnum', filters.pnum, ['p.pnum']);
+    this.addLikeFilter(
+      clauses,
+      replacements,
+      'cardNumber',
+      filters.cardNumber,
+      ['CAST(card.card_number AS CHAR)'],
+    );
+
+    if (clauses.length === 0) {
+      throw new BadRequestException('At least one search filter is required');
+    }
+
+    return {
+      whereClause: clauses.join(' AND '),
+      replacements,
+    };
+  }
+
+  private addLikeFilter(
+    clauses: string[],
+    replacements: Record<string, string>,
+    parameterName: string,
+    value: string | undefined,
+    columns: string[],
+  ): void {
+    const normalizedValue = value?.trim();
+
+    if (!normalizedValue) {
+      return;
+    }
+
+    replacements[parameterName] = `%${normalizedValue}%`;
+    clauses.push(
+      `(${columns
+        .map((column) => `${column} LIKE :${parameterName}`)
+        .join(' OR ')})`,
     );
   }
 }
